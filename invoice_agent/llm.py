@@ -12,6 +12,7 @@ import logging
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
@@ -46,7 +47,7 @@ class ProviderError(Exception):
         self.status = status
 
 STATS = {"model_calls": 0}
-_model_sem = threading.Semaphore(3)
+_model_sem = threading.Semaphore(max(1, config.LLM_CONCURRENCY))
 
 SYSTEM_PROMPT = """You are an accounts-payable control analyst. For every invoice package you are given, choose exactly ONE action and cite the decisive evidence.
 
@@ -409,7 +410,15 @@ def decide(packages: List[dict], policy: str = "") -> List[dict]:
         if k not in known and k not in pending:
             pending[k] = p
     if pending:
-        known.update(_run_model(pending, policy))
+        items = list(pending.items())
+        size = config.LLM_CHUNK_SIZE if config.LLM_CHUNK_SIZE > 0 else len(items)
+        chunks = [dict(items[i : i + size]) for i in range(0, len(items), size)]
+        if len(chunks) == 1:
+            known.update(_run_model(chunks[0], policy))
+        else:  # parallel chunks: wall-clock time is that of the slowest chunk, not the sum
+            with ThreadPoolExecutor(max_workers=len(chunks)) as ex:
+                for res in ex.map(lambda ch: _run_model(ch, policy), chunks):
+                    known.update(res)
     out = []
     for k in keys:
         if k not in known:

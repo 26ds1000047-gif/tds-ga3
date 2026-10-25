@@ -48,6 +48,10 @@ LLM_JSON_MODE = _bool("LLM_JSON_MODE", True)
 LLM_MAX_TOKENS = int(_env("LLM_MAX_TOKENS", "8000"))
 LLM_BUDGET_SECONDS = float(_env("LLM_BUDGET_SECONDS", "36"))  # total across retries; request limit is 45s
 LLM_EXTRA_BODY = json.loads(_env("LLM_EXTRA_BODY", "{}") or "{}")  # e.g. {"reasoning_effort":"none"}
+# Speed: split a batch into chunks of this many packages and call the model for all chunks IN PARALLEL.
+# 0 = one single call for the whole batch (cheapest). e.g. 4 -> 12 packages = 3 parallel calls.
+LLM_CHUNK_SIZE = int(_env("LLM_CHUNK_SIZE", "0"))
+LLM_CONCURRENCY = int(_env("LLM_CONCURRENCY", "4"))  # max simultaneous model calls per instance
 LLM_MOCK = _bool("LLM_MOCK", False)  # tests only
 LLM_MOCK_DELAY = float(_env("LLM_MOCK_DELAY", "0"))  # tests only
 MAX_LLM_CALLS_PER_DAY = int(_env("MAX_LLM_CALLS_PER_DAY", "300"))

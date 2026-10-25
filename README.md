@@ -85,3 +85,10 @@ Run the real thing locally with `vercel dev` (needs Vercel CLI) or
 | `EVIDENCE_REF_STYLE` | `bracketed` | `[REF-1]` vs `REF-1`. Check against a real sample. |
 | `RECEIPTS_IN_SAME_ARTIFACT` | `false` | Receipts as 2nd artifact vs 2nd Part of the proposals artifact. |
 | `MAX_LLM_CALLS_PER_DAY` | 300 | Stops strangers burning your free quota. |
+
+## Free dress rehearsal (uses none of your 10 Checks)
+```bash
+python3 scripts/rehearsal.py https://<project>.vercel.app/a2a
+```
+Sends 12 synthetic decoy-heavy packages to the live agent, plays the grader (results, receipts, replay,
+outsider token) and prints timing, action accuracy and PASS/FAIL for the lifecycle.

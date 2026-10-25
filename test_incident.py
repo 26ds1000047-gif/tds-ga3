@@ -232,7 +232,8 @@ def main():
         check("A: create 200 json", r.status_code == 200 and r.headers["content-type"] == "application/json")
         a = r.json()
         check("A: one model call", stats() - c1 == 1)
-        check("A: waiting response has exactly the spec fields", set(a) == {"runId", "status", "diagnosis", "dispatches", "approvals"}, sorted(a))
+        check("A: waiting response carries the mandatory logs", set(a) == {"runId", "status", "diagnosis", "dispatches", "approvals", "actionLog", "receiptLog"}
+              and a["actionLog"] == a["dispatches"] and a["receiptLog"] == [], sorted(a))
         check("A: waiting + diagnosis", a["status"] == "waiting" and a["diagnosis"]["rootCause"] == "capacity" and 2 <= len(a["diagnosis"]["evidence"]) <= 4)
         ds = a["dispatches"]
         check("A: 3 diagnostic dispatches, no approvals", len(ds) == 3 and a["approvals"] == [] and all(d["phase"] == "diagnostic" for d in ds))

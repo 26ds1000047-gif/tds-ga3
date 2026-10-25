@@ -275,9 +275,10 @@ def view(st: dict, dispatches: List[dict], approvals: List[dict]) -> dict:
     else:
         out["chosenEffect"] = st["chosenEffect"]
         out["suppressed"] = st["suppressed"]
+    # both logs are mandatory arrays in every response; the trace only exists once the run is terminal
+    out["actionLog"] = st["actionLog"]
+    out["receiptLog"] = st["receiptLog"]
     if st["status"] != "waiting":
-        out["actionLog"] = st["actionLog"]
-        out["receiptLog"] = st["receiptLog"]
         out["otlp"] = st["otlp"]
     return out
 
@@ -435,7 +436,7 @@ def _replay_text(row: dict) -> str:
     return row["create_response"]
 
 
-_sampled = {"n": 0, "r": 0}
+_sampled = {"n": 0, "r": 0, "p": 0}
 
 
 def _log_receipt_shape(run_id: str, body: dict) -> None:
@@ -450,6 +451,13 @@ def _log_receipt_shape(run_id: str, body: dict) -> None:
                  len(body.get("outcomes") or []), len(body.get("approvals") or []))
     except Exception:
         pass
+
+
+def _log_response_sample(run_id: str, text: str) -> None:
+    if _sampled["p"] >= 4:
+        return
+    _sampled["p"] += 1
+    log.info("INCIDENT_RESPONSE run=%s %s", run_id, text[:3500])
 
 
 def _log_sample(body: dict, headers: Optional[dict] = None) -> None:
@@ -481,6 +489,7 @@ def create(body: dict, headers: dict) -> Tuple[int, str]:
         if state == "won":
             break
         if state == "done":
+            log.info("INCIDENT_REPLAY create %s", run_id)
             return 200, _replay_text(row)
         if state == "conflict":
             raise ApiError(409, "RUN_CONFLICT", "This runId was already used with different content.")
@@ -493,6 +502,7 @@ def create(body: dict, headers: dict) -> Tuple[int, str]:
         st, dispatches = new_state(body, plan_, model, headers, t0)
         out = view(st, dispatches, [])
         text = dump(out, st["_forbidden"])
+        _log_response_sample(run_id, text)
         with store.txn() as c:
             c.execute("UPDATE inc_runs SET state=%s, create_response=%s WHERE run_id=%s", (_clean_state_out(st), text, run_id))
         log.info("incident %s planned: cause=%s diag=%s effect=%s approval=%s model=%s %.1fs", run_id,
@@ -528,6 +538,7 @@ def receipt(run_id: str, body: dict) -> Tuple[int, str]:
 
 
 def get(run_id: str) -> Tuple[int, str]:
+    log.info("INCIDENT_GET %s", run_id)
     with store.txn() as c:
         row = c.execute("SELECT state FROM inc_runs WHERE run_id=%s", (run_id,)).fetchone()
     if row is None or not row["state"]:

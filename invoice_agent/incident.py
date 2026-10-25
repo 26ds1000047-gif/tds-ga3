@@ -436,7 +436,7 @@ def _replay_text(row: dict) -> str:
     return row["create_response"]
 
 
-_sampled = {"n": 0, "r": 0, "p": 0}
+_sampled = {"n": 0, "r": 0, "p": 0, "q": 0, "d": 0}
 
 
 def _log_receipt_shape(run_id: str, body: dict) -> None:
@@ -453,11 +453,42 @@ def _log_receipt_shape(run_id: str, body: dict) -> None:
         pass
 
 
+def _is_probe(run_id: str) -> bool:
+    return not str(run_id).startswith("rehearsal")
+
+
 def _log_response_sample(run_id: str, text: str) -> None:
-    if _sampled["p"] >= 4:
+    """The first responses to real (non-rehearsal) runs, so we can see what the grader received."""
+    if not _is_probe(run_id) or _sampled["p"] >= 12:
         return
     _sampled["p"] += 1
-    log.info("INCIDENT_RESPONSE run=%s %s", run_id, text[:3500])
+    log.info("INCIDENT_RESPONSE run=%s %s", run_id, text[:3800])
+
+
+def _log_plan(run_id: str, plan_: dict, forbidden: List[str]) -> None:
+    if not _is_probe(run_id) or _sampled["q"] >= 12:
+        return
+    _sampled["q"] += 1
+    log.info("INCIDENT_PLAN run=%s %s", run_id, json.dumps(scrub(plan_, forbidden), ensure_ascii=False)[:3800])
+
+
+def _log_request_dump(run_id: str, body: dict) -> None:
+    """Synthetic incidents only: the first few real requests, minus `sensitive`, so we can reproduce them offline."""
+    if not _is_probe(run_id) or _sampled["d"] >= 3:
+        return
+    _sampled["d"] += 1
+    try:
+        fb = forbidden_strings(body)
+        inc = body["incident"]
+        head = scrub({"incident": {k: v for k, v in inc.items() if k != "transcript"},
+                      "toolCatalog": body.get("toolCatalog"),
+                      "policy": {k: v for k, v in (body.get("policy") or {}).items() if k != "doNotExport"}}, fb)
+        text = json.dumps(head, ensure_ascii=False) + " || TRANSCRIPT: " + scrub(inc["transcript"], fb).replace("\n", " | ")
+        parts = [text[i:i + 3300] for i in range(0, len(text), 3300)]
+        for i, part in enumerate(parts, 1):
+            log.info("INCIDENT_TX run=%s part=%d/%d %s", run_id, i, len(parts), part)
+    except Exception as e:  # logging must never break a request
+        log.info("INCIDENT_TX failed %s", type(e).__name__)
 
 
 def _log_sample(body: dict, headers: Optional[dict] = None) -> None:
@@ -498,7 +529,9 @@ def create(body: dict, headers: dict) -> Tuple[int, str]:
         time.sleep(0.3)
     try:
         _log_sample(body, headers)
+        _log_request_dump(run_id, body)
         plan_, model = planner.plan(body, started + config.INCIDENT_BUDGET_SECONDS)
+        _log_plan(run_id, plan_, forbidden_strings(body))
         st, dispatches = new_state(body, plan_, model, headers, t0)
         out = view(st, dispatches, [])
         text = dump(out, st["_forbidden"])

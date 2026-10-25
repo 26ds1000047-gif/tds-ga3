@@ -142,7 +142,7 @@ def main():
         check("invalid requests made no model call", stats() == before)
 
         # ---- propose ----
-        core = [dossier(f"c{i}", a) for i, a in enumerate(ACTIONS)]
+        core = [dossier(f"c{i}{run}", a) for i, a in enumerate(ACTIONS)]
         eval_a = "ev-a-" + run
         body_a = propose_body(eval_a, core, priv)
         t = time.time()

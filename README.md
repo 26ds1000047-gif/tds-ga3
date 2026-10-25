@@ -114,3 +114,21 @@ Submission URL: `https://<project>.vercel.app/v1/mailroom/actions` (one endpoint
   Bump `PROMPT_VERSION` in `mailroom_llm.py` after editing the prompt.
 * Optional env vars: `MAILROOM_MODEL`, `MAILROOM_FALLBACK_MODELS`, `MAILROOM_EXTRA_BODY`, `MAILROOM_CHUNK_SIZE` (12),
   `MAILROOM_CONCURRENCY` (6), `MAILROOM_BUDGET_SECONDS` (44). They default to the project-1 model settings.
+
+# Project 3: Observable Incident Triage (same Vercel project)
+Submission base URL: `https://<project>.vercel.app` (routes `/v2/incidents`, `/v2/incidents/{runId}/receipts`, `/v2/incidents/{runId}`).
+
+| File | Layer | Calls the model? |
+|---|---|---|
+| `invoice_agent/incident_plan.py` | the planner: root cause, diagnostics, effect; validates everything the model says | only here, once per runId |
+| `invoice_agent/incident.py` | validation, receipt-driven state machine (retry, timeout, approval), storage, replay/409 | never |
+| `invoice_agent/incident_trace.py` | OTLP trace built from stored dispatches and receipts | never |
+
+* `sensitive` is never sent to the model; every outgoing value is scrubbed of its strings as a last defence.
+* One 503 gets exactly one retry (new CLIENT span id); a timeout fails the run and suppresses the effect;
+  rollback/disable only after a matching approval receipt.
+* Replays return the stored response byte for byte. Flip `INCIDENT_REPLAY_MODE=current` if the grader expects the
+  original-request replay to return the current state instead.
+* Tests: `python test_incident.py`. Live rehearsal using none of your Checks: `python3 scripts/incident_rehearsal.py https://<project>.vercel.app`.
+* Logs: search `INCIDENT_SAMPLE` (real catalog/policy/transcript head) and `planned:` (what the planner chose).
+* Optional env: `INCIDENT_MODEL`, `INCIDENT_FALLBACK_MODELS`, `INCIDENT_EXTRA_BODY`, `INCIDENT_BUDGET_SECONDS` (14), `INCIDENT_FIRST_CALL_SECONDS` (10).

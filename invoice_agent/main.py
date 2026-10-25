@@ -11,7 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response
 
-from . import config, llm, mailroom, service
+from . import config, incident, llm, mailroom, service
 from .errors import ApiError
 
 logging.basicConfig(level=logging.INFO)
@@ -360,6 +360,64 @@ async def _mailroom_other(request: Request):
 for _path in ("/v1/mailroom/actions", "/v1/mailroom/actions/"):
     app.add_api_route(_path, _mailroom_post, methods=["POST"])
     app.add_api_route(_path, _mailroom_other, methods=["GET", "PUT", "PATCH", "DELETE"])
+
+
+# ----------------------------------------------------------------------------
+# Project 3: incident agent (plain application/json, no auth)
+# ----------------------------------------------------------------------------
+async def _incident_call(fn, *args):
+    try:
+        status, text = await run_in_threadpool(fn, *args)
+        return _mr_response(text, status)
+    except ApiError as e:
+        return _mr_error(e.status, e.code, e.message)
+    except psycopg.Error as e:
+        log.error("incident database error: %s %s", type(e).__name__, str(e)[:200])
+        return _mr_error(503, "STORAGE_UNAVAILABLE", "The service is temporarily unavailable.")
+    except Exception:
+        log.exception("incident unhandled error")
+        return _mr_error(500, "INTERNAL", "Internal error.")
+
+
+async def _incident_body(request: Request):
+    raw = await request.body()
+    if len(raw) > config.MAX_BODY_BYTES:
+        raise ApiError(413, "TOO_LARGE", "Request too large.")
+    try:
+        body = json.loads(raw)
+    except Exception:
+        raise ApiError(400, "INVALID_JSON", "The request body is not valid JSON.")
+    if not isinstance(body, dict):
+        raise ApiError(400, "INVALID_JSON", "The request body must be a JSON object.")
+    return body
+
+
+async def _incident_create(request: Request):
+    try:
+        body = await _incident_body(request)
+    except ApiError as e:
+        return _mr_error(e.status, e.code, e.message)
+    hdrs = {"traceparent": request.headers.get("traceparent"), "tracestate": request.headers.get("tracestate")}
+    return await _incident_call(incident.create, body, hdrs)
+
+
+async def _incident_receipt(run_id: str, request: Request):
+    try:
+        body = await _incident_body(request)
+    except ApiError as e:
+        return _mr_error(e.status, e.code, e.message)
+    return await _incident_call(incident.receipt, run_id, body)
+
+
+async def _incident_get(run_id: str, request: Request):
+    return await _incident_call(incident.get, run_id)
+
+
+for _sfx in ("", "/"):
+    app.add_api_route("/v2/incidents" + _sfx, _incident_create, methods=["POST"])
+    app.add_api_route("/v2/incidents" + _sfx, _mailroom_other, methods=["GET", "PUT", "PATCH", "DELETE"])
+    app.add_api_route("/v2/incidents/{run_id}/receipts" + _sfx, _incident_receipt, methods=["POST"])
+    app.add_api_route("/v2/incidents/{run_id}" + _sfx, _incident_get, methods=["GET"])
 
 
 # ----------------------------------------------------------------------------

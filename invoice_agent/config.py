@@ -79,3 +79,14 @@ MAILROOM_BUDGET_SECONDS = float(_env("MAILROOM_BUDGET_SECONDS", "44"))  # reques
 MAILROOM_MAX_DOSSIERS = int(_env("MAILROOM_MAX_DOSSIERS", "200"))
 MAILROOM_MOCK = _bool("MAILROOM_MOCK", False)  # tests only: reads the decision from dossier["_mock"]
 MAILROOM_MOCK_DELAY = float(_env("MAILROOM_MOCK_DELAY", "0"))  # tests only
+
+# --- Incident agent (project 3) ----------------------------------------------
+INCIDENT_MODEL = _env("INCIDENT_MODEL") or LLM_MODEL
+INCIDENT_FALLBACK_MODELS = [m.strip() for m in _env("INCIDENT_FALLBACK_MODELS").split(",") if m.strip()] or LLM_FALLBACK_MODELS
+INCIDENT_EXTRA_BODY = json.loads(_env("INCIDENT_EXTRA_BODY", "") or "null") or LLM_EXTRA_BODY
+INCIDENT_BUDGET_SECONDS = float(_env("INCIDENT_BUDGET_SECONDS", "14"))  # request limit is 18 s
+INCIDENT_FIRST_CALL_SECONDS = float(_env("INCIDENT_FIRST_CALL_SECONDS", "10"))
+# "snapshot": replaying a request/receipt returns the exact response originally given (default).
+# "current": replaying the original request returns the current stored state instead.
+INCIDENT_REPLAY_MODE = _env("INCIDENT_REPLAY_MODE", "snapshot").lower()
+INCIDENT_MOCK = _bool("INCIDENT_MOCK", False)  # tests only: plan comes from body["_mock_plan"]

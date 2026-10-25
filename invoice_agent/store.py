@@ -72,6 +72,21 @@ CREATE TABLE IF NOT EXISTS mr_evals (
 );
 CREATE TABLE IF NOT EXISTS mr_decisions (key TEXT PRIMARY KEY, doc TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS mr_inflight (key TEXT PRIMARY KEY, claimed_at TIMESTAMPTZ NOT NULL DEFAULT now());
+-- Incident agent (project 3)
+CREATE TABLE IF NOT EXISTS inc_runs (
+    run_id          TEXT PRIMARY KEY,
+    req_hash        TEXT NOT NULL,
+    claimed_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    state           TEXT,
+    create_response TEXT
+);
+CREATE TABLE IF NOT EXISTS inc_receipts (
+    run_id     TEXT NOT NULL,
+    receipt_id TEXT NOT NULL,
+    rhash      TEXT NOT NULL,
+    response   TEXT NOT NULL,
+    PRIMARY KEY (run_id, receipt_id)
+);
 CREATE TABLE IF NOT EXISTS mr_executions (
     evaluation_id TEXT NOT NULL,
     dossier_id    TEXT NOT NULL,

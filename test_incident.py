@@ -232,6 +232,7 @@ def main():
         check("A: create 200 json", r.status_code == 200 and r.headers["content-type"] == "application/json")
         a = r.json()
         check("A: one model call", stats() - c1 == 1)
+        check("A: waiting response has exactly the spec fields", set(a) == {"runId", "status", "diagnosis", "dispatches", "approvals"}, sorted(a))
         check("A: waiting + diagnosis", a["status"] == "waiting" and a["diagnosis"]["rootCause"] == "capacity" and 2 <= len(a["diagnosis"]["evidence"]) <= 4)
         ds = a["dispatches"]
         check("A: 3 diagnostic dispatches, no approvals", len(ds) == 3 and a["approvals"] == [] and all(d["phase"] == "diagnostic" for d in ds))
@@ -263,11 +264,13 @@ def main():
         check("A: duplicate outcome -> 422", bad.status_code in (400, 422))
         bad, _ = receipt(run, [outcome(ds[0]), {**outcome(ds[1]), "callId": "call_nope0000"}])
         check("A: one bad outcome rejects the whole receipt", bad.status_code in (400, 422))
-        check("A: nothing changed after invalid receipts", httpx.get(BASE + f"/v2/incidents/{run}").json()["receiptLog"] == [])
+        check("A: nothing changed after invalid receipts", httpx.get(BASE + f"/v2/incidents/{run}").json().get("dispatches") == ds)
         check("receipt for unknown run -> 404", receipt("nope-run-1234", [outcome(ds[0])])[0].status_code == 404)
 
+        okk = post(f"/v2/incidents/{run}/receipts", {"receiptId": "rc-empty-apps", "outcomes": [], "approvals": []})
+        check("A: empty outcomes+approvals -> 422", okk.status_code in (400, 422))
         # receipt 1: two succeed, one 503
-        r1, b1 = receipt(run, [outcome(ds[0]), outcome(ds[1]), outcome(ds[2], 503)], rid="rc-A-1")
+        r1, b1 = receipt(run, [outcome(ds[0]), outcome(ds[1]), outcome(ds[2], 503)], rid="rc-A-1", apps=[])
         leak_texts.append((canA, r1.text))
         j1 = r1.json()
         check("A: receipt 1 ok, waiting", r1.status_code == 200 and j1["status"] == "waiting")

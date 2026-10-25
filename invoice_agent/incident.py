@@ -154,11 +154,14 @@ def validate_receipt(body: dict) -> None:
     if not _is_str(body.get("receiptId"), 256):
         raise _bad("receiptId is required")
     outs, apps = body.get("outcomes"), body.get("approvals")
-    if outs is None and apps is None:
+    for name, v in (("outcomes", outs), ("approvals", apps)):
+        if v is not None and not isinstance(v, list):
+            raise _bad(f"{name} must be a list")
+    if not outs and not apps:
         raise _bad("a receipt needs outcomes or approvals")
-    if outs is not None:
-        if not isinstance(outs, list) or not outs:
-            raise _bad("outcomes must be a non-empty list")
+    if outs:
+        if not isinstance(outs, list):
+            raise _bad("outcomes must be a list")
         for o in outs:
             if not isinstance(o, dict):
                 raise _bad("each outcome must be an object")
@@ -172,9 +175,7 @@ def validate_receipt(body: dict) -> None:
             for f in ("resultClass", "errorType"):
                 if f in o and o[f] is not None and not isinstance(o[f], str):
                     raise _bad(f"outcome.{f} must be a string")
-    if apps is not None:
-        if not isinstance(apps, list) or not apps:
-            raise _bad("approvals must be a non-empty list")
+    if apps:
         for a in apps:
             if not isinstance(a, dict) or not _is_str(a.get("approvalId"), 512) or not _is_str(a.get("nonce"), 512) \
                     or not _is_str(a.get("decision"), 64):
@@ -274,9 +275,9 @@ def view(st: dict, dispatches: List[dict], approvals: List[dict]) -> dict:
     else:
         out["chosenEffect"] = st["chosenEffect"]
         out["suppressed"] = st["suppressed"]
-    out["actionLog"] = st["actionLog"]
-    out["receiptLog"] = st["receiptLog"]
     if st["status"] != "waiting":
+        out["actionLog"] = st["actionLog"]
+        out["receiptLog"] = st["receiptLog"]
         out["otlp"] = st["otlp"]
     return out
 
@@ -434,13 +435,29 @@ def _replay_text(row: dict) -> str:
     return row["create_response"]
 
 
-_sampled = {"n": 0}
+_sampled = {"n": 0, "r": 0}
 
 
-def _log_sample(body: dict) -> None:
-    if _sampled["n"] >= 2:
+def _log_receipt_shape(run_id: str, body: dict) -> None:
+    if _sampled["r"] >= 8:
+        return
+    _sampled["r"] += 1
+    try:
+        o = (body.get("outcomes") or [{}])[0] if isinstance(body.get("outcomes"), list) and body.get("outcomes") else {}
+        a = (body.get("approvals") or [{}])[0] if isinstance(body.get("approvals"), list) and body.get("approvals") else {}
+        log.info("RECEIPT_SHAPE run=%s keys=%s outcome_keys=%s approval_keys=%s n_out=%s n_app=%s", run_id, sorted(body.keys()),
+                 sorted(o.keys()) if isinstance(o, dict) else o, sorted(a.keys()) if isinstance(a, dict) else a,
+                 len(body.get("outcomes") or []), len(body.get("approvals") or []))
+    except Exception:
+        pass
+
+
+def _log_sample(body: dict, headers: Optional[dict] = None) -> None:
+    if _sampled["n"] >= 6:
         return
     _sampled["n"] += 1
+    log.info("INCIDENT_HEADERS traceparent=%s tracestate=%s body_traceparent=%s", (headers or {}).get("traceparent"),
+             (headers or {}).get("tracestate"), body.get("traceparent"))
     try:
         inc, pol = body["incident"], body["policy"]
         log.info("INCIDENT_SAMPLE keys=%s incident_keys=%s lines=%d allowed=%s policy=%s tools=%s head=%s",
@@ -471,7 +488,7 @@ def create(body: dict, headers: dict) -> Tuple[int, str]:
             raise ApiError(503, "BUSY", "The same request is still being processed; retry shortly.")
         time.sleep(0.3)
     try:
-        _log_sample(body)
+        _log_sample(body, headers)
         plan_, model = planner.plan(body, started + config.INCIDENT_BUDGET_SECONDS)
         st, dispatches = new_state(body, plan_, model, headers, t0)
         out = view(st, dispatches, [])
@@ -488,6 +505,7 @@ def create(body: dict, headers: dict) -> Tuple[int, str]:
 
 
 def receipt(run_id: str, body: dict) -> Tuple[int, str]:
+    _log_receipt_shape(run_id, body)
     validate_receipt(body)
     rid = body["receiptId"]
     rhash = sha(canon(body))

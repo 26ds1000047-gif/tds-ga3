@@ -42,7 +42,7 @@ DIAGNOSTICS
 
 EFFECT
 - Pick exactly one tool from effectTools that fixes the root cause. Cite at least one of your root-cause evidence IDs.
-- If the service is ALREADY at its permitted scaling limit (for example maximum replicas/instances reached), do NOT scale; page the owner with the paging/owner-notification effect tool instead.
+- Scaling rule, both directions. If the evidence shows the service is ALREADY at its permitted scaling limit (current replicas equal the permitted maximum), do NOT scale; page the owner with the paging/owner-notification effect tool instead. If headroom remains (current replicas are below the permitted maximum or an approved ceiling), scale the service up with scale_service to a value within the limit; when a line states an approved target or ceiling as an exact number, use exactly that number. Never page the owner when there is headroom to scale.
 - Destructive effects (rollback_deployment, disable_feature) must target exactly the deployment or feature that the evidence shows is responsible, not a neighbouring or previous one. Approval is handled by the system; just choose the tool and arguments.
 - Arguments must satisfy the inputSchema and use exact identifiers from the transcript.
 

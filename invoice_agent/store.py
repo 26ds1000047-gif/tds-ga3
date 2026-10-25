@@ -57,6 +57,29 @@ CREATE TABLE IF NOT EXISTS counters (
     name TEXT PRIMARY KEY,
     n    BIGINT NOT NULL
 );
+
+-- Mailroom (project 2). One row per evaluationId.
+CREATE TABLE IF NOT EXISTS mr_evals (
+    evaluation_id    TEXT PRIMARY KEY,
+    req_hash         TEXT NOT NULL,
+    input_digest     TEXT NOT NULL,
+    verifier         TEXT NOT NULL,
+    claimed_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    propose_response TEXT,
+    proposals        TEXT,
+    commit_hash      TEXT,
+    commit_response  TEXT
+);
+CREATE TABLE IF NOT EXISTS mr_decisions (key TEXT PRIMARY KEY, doc TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS mr_inflight (key TEXT PRIMARY KEY, claimed_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS mr_executions (
+    evaluation_id TEXT NOT NULL,
+    dossier_id    TEXT NOT NULL,
+    call_id       TEXT NOT NULL,
+    receipt_id    TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    PRIMARY KEY (evaluation_id, dossier_id)
+);
 """
 
 _SCHEMA_LOCK_ID = 727_001

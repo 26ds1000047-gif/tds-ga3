@@ -67,3 +67,15 @@ MAX_PACKAGES = int(_env("MAX_PACKAGES", "60"))
 MAX_BODY_BYTES = int(_env("MAX_BODY_BYTES", str(4_000_000)))  # Vercel itself caps bodies at 4.5 MB
 MAX_RESPONSE_BYTES = 512 * 1024
 DEBUG_STATS = _bool("DEBUG_STATS", False)  # tests only
+
+# --- Mailroom (project 2) ---------------------------------------------------
+MAILROOM_MODEL = _env("MAILROOM_MODEL") or LLM_MODEL
+MAILROOM_FALLBACK_MODELS = [m.strip() for m in _env("MAILROOM_FALLBACK_MODELS").split(",") if m.strip()] or LLM_FALLBACK_MODELS
+# Mailroom is a harder judgement task than invoices; default to the shared extra body, override if you want more thinking.
+MAILROOM_EXTRA_BODY = json.loads(_env("MAILROOM_EXTRA_BODY", "") or "null") or LLM_EXTRA_BODY
+MAILROOM_CHUNK_SIZE = int(_env("MAILROOM_CHUNK_SIZE", "12"))      # dossiers per model call (calls run in parallel)
+MAILROOM_CONCURRENCY = int(_env("MAILROOM_CONCURRENCY", "6"))     # max simultaneous model calls per instance
+MAILROOM_BUDGET_SECONDS = float(_env("MAILROOM_BUDGET_SECONDS", "44"))  # request limit is 55 s
+MAILROOM_MAX_DOSSIERS = int(_env("MAILROOM_MAX_DOSSIERS", "200"))
+MAILROOM_MOCK = _bool("MAILROOM_MOCK", False)  # tests only: reads the decision from dossier["_mock"]
+MAILROOM_MOCK_DELAY = float(_env("MAILROOM_MOCK_DELAY", "0"))  # tests only

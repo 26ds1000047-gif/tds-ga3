@@ -11,7 +11,7 @@ from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, Response
 
-from . import config, llm, service
+from . import config, llm, mailroom, service
 from .errors import ApiError
 
 logging.basicConfig(level=logging.INFO)
@@ -311,6 +311,55 @@ async def cancel(task_id: str, request: Request):
             raise ApiError(400, "INVALID_JSON", "The request body is not valid JSON.")
     task = await run_in_threadpool(service.cancel_task, principal, task_id)
     return a2a_json(task)
+
+
+# ----------------------------------------------------------------------------
+# Project 2: mailroom action gate (plain application/json, no auth, one endpoint)
+# ----------------------------------------------------------------------------
+def _mr_response(text: str, status: int = 200) -> Response:
+    return Response(content=text.encode("utf-8"), status_code=status, media_type="application/json",
+                    headers={"Cache-Control": "no-store"})
+
+
+def _mr_error(status: int, code: str, message: str) -> Response:
+    return _mr_response(json.dumps({"error": {"code": code, "status": status, "message": message}},
+                                   separators=(",", ":")), status)
+
+
+async def _mailroom_post(request: Request):
+    try:
+        raw = await request.body()
+        if len(raw) > config.MAX_BODY_BYTES:
+            return _mr_error(413, "TOO_LARGE", "Request too large.")
+        try:
+            body = json.loads(raw)
+        except Exception:
+            return _mr_error(400, "INVALID_JSON", "The request body is not valid JSON.")
+        if not isinstance(body, dict):
+            return _mr_error(400, "INVALID_JSON", "The request body must be a JSON object.")
+        op = body.get("operation")
+        if op == "propose":
+            return _mr_response(await run_in_threadpool(mailroom.propose, body))
+        if op == "commit":
+            return _mr_response(await run_in_threadpool(mailroom.commit, body))
+        return _mr_error(400, "INVALID_OPERATION", "operation must be 'propose' or 'commit'.")
+    except ApiError as e:
+        return _mr_error(e.status, e.code, e.message)
+    except psycopg.Error as e:
+        log.error("mailroom database error: %s %s", type(e).__name__, str(e)[:200])
+        return _mr_error(503, "STORAGE_UNAVAILABLE", "The service is temporarily unavailable.")
+    except Exception:
+        log.exception("mailroom unhandled error")
+        return _mr_error(500, "INTERNAL", "Internal error.")
+
+
+async def _mailroom_other(request: Request):
+    return _mr_error(405, "METHOD_NOT_ALLOWED", "Use POST.")
+
+
+for _path in ("/v1/mailroom/actions", "/v1/mailroom/actions/"):
+    app.add_api_route(_path, _mailroom_post, methods=["POST"])
+    app.add_api_route(_path, _mailroom_other, methods=["GET", "PUT", "PATCH", "DELETE"])
 
 
 # ----------------------------------------------------------------------------

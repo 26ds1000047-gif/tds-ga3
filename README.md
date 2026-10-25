@@ -92,3 +92,25 @@ python3 scripts/rehearsal.py https://<project>.vercel.app/a2a
 ```
 Sends 12 synthetic decoy-heavy packages to the live agent, plays the grader (results, receipts, replay,
 outsider token) and prints timing, action accuracy and PASS/FAIL for the lifecycle.
+
+# Project 2: Safe AI Mailroom (same Vercel project)
+Submission URL: `https://<project>.vercel.app/v1/mailroom/actions` (one endpoint, two POST operations, no auth).
+
+| File | Layer | Calls the model? |
+|---|---|---|
+| `invoice_agent/mailroom.py` | validation, propose/commit lifecycle, Ed25519 receipt checks, Postgres state | never |
+| `invoice_agent/mailroom_llm.py` | prompt, strict validation of model output, exact target/payload building, callId/digest | only here |
+
+* Model returns only an action, evidence lineIds and a few short identifiers. Code builds target/payload, checks that every
+  identifier appears verbatim in the dossier, blocks secret-looking values, checks evidence lineIds exist, and falls back to a
+  safe `no_action` (never cached, never outbound) if the model cannot produce a valid answer in time.
+* Decisions are cached by `sha256(canonical dossier)`; stable dossiers get the same proposal and `callId` in every evaluation.
+  Two evaluations that arrive at the same time share one model call (`mr_inflight` claim rows).
+* `commit` verifies every receipt (signature with the key stored for that evaluation, callId, action, proposalDigest, one
+  receipt per proposal) before recording anything; a rejected commit changes nothing.
+* Tests: `python test_mailroom.py` (mock model, real signatures). Live dress rehearsal that uses none of your Checks:
+  `python3 scripts/mailroom_rehearsal.py https://<project>.vercel.app/v1/mailroom/actions` (needs `pip install cryptography`).
+* After a real Check, Vercel Logs: search `MAILROOM_SAMPLE` (real dossier format) and `MR_DECISION` (what was chosen and why).
+  Bump `PROMPT_VERSION` in `mailroom_llm.py` after editing the prompt.
+* Optional env vars: `MAILROOM_MODEL`, `MAILROOM_FALLBACK_MODELS`, `MAILROOM_EXTRA_BODY`, `MAILROOM_CHUNK_SIZE` (12),
+  `MAILROOM_CONCURRENCY` (6), `MAILROOM_BUDGET_SECONDS` (44). They default to the project-1 model settings.

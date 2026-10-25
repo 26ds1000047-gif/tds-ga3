@@ -33,7 +33,17 @@ ACTIONS = (
 )
 ID_KEYS = {"packageId", "package_id", "id", "batchId", "batch_id"}
 REF_RE = re.compile(r"\[([^\[\]\n]{1,100})\]")
-MAX_ATTEMPTS = 3  # validation retries AND provider errors (503/429) share this budget
+MAX_VALIDATION_ROUNDS = 3  # rounds where the model answered but some answers were invalid
+MAX_PROVIDER_ERRORS = 6    # 503/429/timeouts before giving up (time budget also applies)
+
+
+class ProviderError(Exception):
+    """HTTP error from the model provider (status + short, key-redacted body)."""
+
+    def __init__(self, status: int, body: str):
+        body = body.replace(config.LLM_API_KEY, "***") if config.LLM_API_KEY else body
+        super().__init__(f"HTTP {status}: {body[:300]}")
+        self.status = status
 
 STATS = {"model_calls": 0}
 _model_sem = threading.Semaphore(3)
@@ -270,7 +280,8 @@ def _chat(messages, timeout: float, model: str) -> str:
         headers={"Authorization": f"Bearer {config.LLM_API_KEY}"},
         timeout=timeout,
     )
-    r.raise_for_status()
+    if r.status_code >= 400:
+        raise ProviderError(r.status_code, r.text)
     return r.json()["choices"][0]["message"]["content"] or ""
 
 
@@ -320,12 +331,15 @@ def _run_model(pending: Dict[str, dict], policy: str) -> Dict[str, dict]:
     todo = keys
 
     models = [config.LLM_MODEL] + config.LLM_FALLBACK_MODELS
-    mi = 0  # index into models; advances only when the provider errors
-    for attempt in range(1, MAX_ATTEMPTS + 1):
-        model = models[mi % len(models)]
+    mi = 0          # index into models; advances only when the provider errors
+    errors = 0      # provider errors so far
+    rounds = 0      # rounds where the model actually answered
+    while todo:
         remaining = deadline - time.monotonic()
-        if not todo or remaining < 5:
+        if remaining < 5:
+            log.error("model budget exhausted")
             break
+        model = models[mi % len(models)]
         if not config.LLM_MOCK:
             day = datetime.now(timezone.utc).strftime("calls-%Y-%m-%d")
             if store.bump_counter(day) > config.MAX_LLM_CALLS_PER_DAY:
@@ -341,14 +355,20 @@ def _run_model(pending: Dict[str, dict], policy: str) -> Dict[str, dict]:
             else:
                 with _model_sem:
                     content = _chat(_build_messages(items, policy, pos_hints), timeout=remaining - 1, model=model)
-        except Exception as e:  # network, 429, timeout...
-            log.warning("model call failed (attempt %d, model %s): %s", attempt, model, type(e).__name__)
-            mi += 1  # next attempt uses the next model
-            if attempt < MAX_ATTEMPTS and deadline - time.monotonic() > 8 and len(models) == 1:
-                time.sleep(1.0)  # no other model to switch to: brief pause before retrying
+        except Exception as e:  # network, 429, 503, timeout...
+            errors += 1
+            log.warning("model call failed (error %d, model %s): %s %s", errors, model, type(e).__name__, str(e)[:300])
+            mi += 1  # next try uses the next model
+            if errors >= MAX_PROVIDER_ERRORS:
+                break
+            if deadline - time.monotonic() > 10:
+                time.sleep(1.0)
             continue
 
+        rounds += 1
         parsed = _parse(content, len(todo))
+        if not parsed:
+            log.warning("model %s returned no parsable decisions; reply started with: %r", model, content[:200])
         next_todo: List[str] = []
         for i, k in enumerate(todo):
             dec, errs, soft = validate_decision(parsed.get(i), pending[k])
@@ -363,6 +383,12 @@ def _run_model(pending: Dict[str, dict], policy: str) -> Dict[str, dict]:
                 hints[k] = errs
                 next_todo.append(k)
         todo = next_todo
+        if todo and rounds >= MAX_VALIDATION_ROUNDS:
+            break
+
+    for k in todo:
+        if k not in soft_fallback:
+            log.error("no valid decision for a package; last problems: %s", "; ".join(hints.get(k, ["none"]))[:400])
 
     try:
         store.put_decisions(clean)  # one DB round trip for the whole batch

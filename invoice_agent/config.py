@@ -41,7 +41,9 @@ PENDING_WAIT_SECONDS = float(_env("PENDING_WAIT_SECONDS", "40"))
 # --- Model (any OpenAI-compatible /chat/completions endpoint) ---------------
 LLM_BASE_URL = _env("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai")
 LLM_API_KEY = _env("LLM_API_KEY")
-LLM_MODEL = _env("LLM_MODEL", "gemini-2.5-flash")
+LLM_MODEL = _env("LLM_MODEL", "gemini-3.8-flash")
+# Comma-separated backup models, tried in order when the main one errors (e.g. 503 "high demand").
+LLM_FALLBACK_MODELS = [m.strip() for m in _env("LLM_FALLBACK_MODELS", "").split(",") if m.strip()]
 LLM_JSON_MODE = _bool("LLM_JSON_MODE", True)
 LLM_MAX_TOKENS = int(_env("LLM_MAX_TOKENS", "8000"))
 LLM_BUDGET_SECONDS = float(_env("LLM_BUDGET_SECONDS", "36"))  # total across retries; request limit is 45s

@@ -33,7 +33,7 @@ ACTIONS = (
 )
 ID_KEYS = {"packageId", "package_id", "id", "batchId", "batch_id"}
 REF_RE = re.compile(r"\[([^\[\]\n]{1,100})\]")
-MAX_ATTEMPTS = 2
+MAX_ATTEMPTS = 3  # validation retries AND provider errors (503/429) share this budget
 
 STATS = {"model_calls": 0}
 _model_sem = threading.Semaphore(3)
@@ -252,11 +252,11 @@ def _build_messages(items: List[Tuple[int, str]], policy: str, hints: Dict[int, 
     ]
 
 
-def _chat(messages, timeout: float) -> str:
+def _chat(messages, timeout: float, model: str) -> str:
     if not config.LLM_API_KEY:
         raise RuntimeError("LLM_API_KEY is not set")
     body = {
-        "model": config.LLM_MODEL,
+        "model": model,
         "messages": messages,
         "temperature": 0,
         "max_tokens": config.LLM_MAX_TOKENS,
@@ -319,7 +319,10 @@ def _run_model(pending: Dict[str, dict], policy: str) -> Dict[str, dict]:
     hints: Dict[str, List[str]] = {}
     todo = keys
 
+    models = [config.LLM_MODEL] + config.LLM_FALLBACK_MODELS
+    mi = 0  # index into models; advances only when the provider errors
     for attempt in range(1, MAX_ATTEMPTS + 1):
+        model = models[mi % len(models)]
         remaining = deadline - time.monotonic()
         if not todo or remaining < 5:
             break
@@ -337,11 +340,12 @@ def _run_model(pending: Dict[str, dict], policy: str) -> Dict[str, dict]:
                 content = json.dumps({"decisions": [_mock_raw(i, pending[k]) for i, k in enumerate(todo)]})
             else:
                 with _model_sem:
-                    content = _chat(_build_messages(items, policy, pos_hints), timeout=remaining - 1)
+                    content = _chat(_build_messages(items, policy, pos_hints), timeout=remaining - 1, model=model)
         except Exception as e:  # network, 429, timeout...
-            log.warning("model call failed (attempt %d): %s", attempt, type(e).__name__)
-            if attempt < MAX_ATTEMPTS and deadline - time.monotonic() > 8:
-                time.sleep(1.0)
+            log.warning("model call failed (attempt %d, model %s): %s", attempt, model, type(e).__name__)
+            mi += 1  # next attempt uses the next model
+            if attempt < MAX_ATTEMPTS and deadline - time.monotonic() > 8 and len(models) == 1:
+                time.sleep(1.0)  # no other model to switch to: brief pause before retrying
             continue
 
         parsed = _parse(content, len(todo))

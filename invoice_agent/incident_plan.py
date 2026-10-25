@@ -20,6 +20,7 @@ log = logging.getLogger("incident")
 
 LINE_ID_RE = re.compile(r"^\s*\[([^\]\s]{1,80})\]")
 MAX_ROUNDS = 2
+ID_KEY_RE = re.compile(r"(?i)(^|_)(id|ids|name|flag|service|deployment|version|build|region|cluster|host|target|runbook|dependency)s?$|Id$|Name$")
 
 SYSTEM_PROMPT = """You are an incident-response planner. You read an evidence-tagged incident transcript and plan three things: the root cause, the few diagnostic tool calls that confirm it, and ONE remediation effect.
 
@@ -166,7 +167,12 @@ def validate_plan(raw, ctx: dict, soft: bool = False) -> Tuple[Optional[dict], L
         serr = check_schema(args, tool.get("inputSchema") or {}, f"{label}.arguments")
         errs.extend(serr)
         if not soft:
+            props = (tool.get("inputSchema") or {}).get("properties") or {}
             for k, v in args.items():
+                # Only identifiers that must come from the incident are grounded (service, deployment, flag ...).
+                # Enum-constrained values, metrics, severities and windows are validated by the schema instead.
+                if "enum" in (props.get(k) or {}) or not ID_KEY_RE.search(k):
+                    continue
                 if isinstance(v, str) and len(v) >= 3 and v not in ctx["haystack"]:
                     errs.append(f"{label}.arguments.{k}={v!r} does not appear in the incident; copy the exact identifier")
         cev = [e for e in _dedupe(c.get("evidence") or []) if e in ev]
@@ -250,7 +256,7 @@ def make_ctx(body: dict) -> dict:
     catalog = {t["name"]: t for t in body["toolCatalog"] if isinstance(t, dict) and isinstance(t.get("name"), str)}
     max_diag = max(1, min(3, int(pol.get("maximumDiagnostics") or 3)))
     hay = "\n".join([inc.get("transcript", ""), str(inc.get("service", "")), str(inc.get("incidentId", "")),
-                     str(inc.get("title", ""))])
+                     str(inc.get("title", "")), str(inc.get("severity", ""))])
     return {"allowed": list(inc["allowedRootCauses"]), "ids": transcript_ids(inc["transcript"]), "catalog": catalog,
             "effect_tools": list(pol["effectTools"]), "max_diag": max_diag, "haystack": hay}
 

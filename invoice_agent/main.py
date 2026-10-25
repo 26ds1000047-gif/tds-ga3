@@ -370,6 +370,7 @@ async def _incident_call(fn, *args):
         status, text = await run_in_threadpool(fn, *args)
         return _mr_response(text, status)
     except ApiError as e:
+        log.info("INCIDENT_REJECTED %s -> %s %s: %s", getattr(fn, "__name__", "?"), e.status, e.code, e.message)
         return _mr_error(e.status, e.code, e.message)
     except psycopg.Error as e:
         log.error("incident database error: %s %s", type(e).__name__, str(e)[:200])
@@ -396,6 +397,7 @@ async def _incident_create(request: Request):
     try:
         body = await _incident_body(request)
     except ApiError as e:
+        log.info("INCIDENT_REJECTED create -> %s %s: %s", e.status, e.code, e.message)
         return _mr_error(e.status, e.code, e.message)
     hdrs = {"traceparent": request.headers.get("traceparent"), "tracestate": request.headers.get("tracestate")}
     return await _incident_call(incident.create, body, hdrs)

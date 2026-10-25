@@ -33,9 +33,39 @@ class _CollapseSlashes:
         await self.inner(scope, receive, send)
 
 
+class _AccessLog:
+    """One log line per /v2 request: method, path, status, and the headers that decide how a body is read.
+    Silent rejections (unknown route, bad method, unreadable body) otherwise leave no trace in the runtime logs."""
+
+    def __init__(self, inner):
+        self.inner = inner
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not scope["path"].startswith("/v2/"):
+            return await self.inner(scope, receive, send)
+        hdr = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope.get("headers", [])}
+        seen = {"status": None, "ct": None}
+
+        async def wrapped(message):
+            if message["type"] == "http.response.start":
+                seen["status"] = message["status"]
+                for k, v in message.get("headers", []):
+                    if k.lower() == b"content-type":
+                        seen["ct"] = v.decode("latin-1")
+            await send(message)
+
+        try:
+            await self.inner(scope, receive, wrapped)
+        finally:
+            log.info("REQ %s %s -> %s resp_ct=%s req_ct=%s len=%s te=%s expect=%s ua=%s", scope.get("method"), scope["path"][:90],
+                     seen["status"], seen["ct"], hdr.get("content-type"), hdr.get("content-length"), hdr.get("transfer-encoding"),
+                     hdr.get("expect"), (hdr.get("user-agent") or "")[:50])
+
+
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.router.redirect_slashes = False  # never redirect grader requests
 app.add_middleware(_CollapseSlashes)
+app.add_middleware(_AccessLog)
 
 
 # ----------------------------------------------------------------------------
@@ -407,6 +437,7 @@ async def _incident_receipt(run_id: str, request: Request):
     try:
         body = await _incident_body(request)
     except ApiError as e:
+        log.info("INCIDENT_REJECTED receipt body -> %s %s: %s", e.status, e.code, e.message)
         return _mr_error(e.status, e.code, e.message)
     return await _incident_call(incident.receipt, run_id, body)
 

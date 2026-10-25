@@ -436,10 +436,16 @@ def _replay_text(row: dict) -> str:
     return row["create_response"]
 
 
-_sampled = {"n": 0, "r": 0, "p": 0, "q": 0, "d": 0}
+_sampled = {"n": 0, "r": 0, "p": 0, "q": 0, "d": 0, "rb": 0}
 
 
 def _log_receipt_shape(run_id: str, body: dict) -> None:
+    if _is_probe(run_id) and _sampled["rb"] < 40:
+        _sampled["rb"] += 1
+        try:
+            log.info("INCIDENT_RECEIPT_BODY run=%s %s", run_id, json.dumps(body, ensure_ascii=False)[:1500])
+        except Exception:
+            pass
     if _sampled["r"] >= 8:
         return
     _sampled["r"] += 1
